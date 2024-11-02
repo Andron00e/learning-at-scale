@@ -111,4 +111,3 @@ class Signum(torch.optim.Optimizer):
                 p.add_(update)
 
         return loss
-    
