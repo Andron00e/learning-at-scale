@@ -1,6 +1,6 @@
 # Learning @ Scale: a modular codebase to experiment with different ML model training settings
 
-This repository is designed to help researchers create reproducible experiments. Inspired by the [epfml/llm-baselines](https://github.com/epfml/llm-baselines) codebase and the [anoGPT](https://github.com/karpathy/nanoGPT) benchmark.
+This repository is designed to help researchers create reproducible experiments. Inspired by the [epfml/llm-baselines](https://github.com/epfml/llm-baselines) codebase and the [nanoGPT](https://github.com/karpathy/nanoGPT) benchmark.
 
 ## Quickstart 
 
