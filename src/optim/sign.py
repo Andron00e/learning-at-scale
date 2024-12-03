@@ -52,7 +52,6 @@ class Signum(torch.optim.Optimizer):
     def _compute_update(
         self, grad, state, lr, momentum, nesterov, dampening, sign_update, **kwargs
     ):
-
         if momentum != 0:  # Signum check
             buf = state["momentum_buffer"]
             buf.mul_(momentum).add_(grad, alpha=1 - dampening)
@@ -89,7 +88,7 @@ class Signum(torch.optim.Optimizer):
                 state = self.state[p]
 
                 if group["weight_decay"] != 0:
-                    grad = grad.add(p, alpha=group["weight_decay"])
+                    p.mul_(1 - group["lr"] * group["weight_decay"])
 
                 if len(state) == 0:
                     self._init_state(example=p, state=state)
