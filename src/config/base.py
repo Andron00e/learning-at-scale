@@ -162,6 +162,14 @@ def parse_args(base_parser, args, namespace):
     parser.add_argument("--mars_beta2", default=0.99, type=float)
     parser.add_argument("--adafactor_decay_rate", default=-0.8, type=float)
     parser.add_argument("--lamb_use_bias_correction", default=False, type=bool)
+    # sgd_with_adam params
+    parser.add_argument("--proj_norms", default=False, action="store_true") 
+    parser.add_argument("--proj_embeds", default=False, action="store_true")
+    parser.add_argument("--proj_logits", default=False, action="store_true")
+    parser.add_argument("--sgd_sign_update", default=False, action="store_true")
+    parser.add_argument("--sign_norm", default=False, action="store_true")
+    parser.add_argument("--normalized", default=False, action="store_true")
+    parser.add_argument("--sgd_lr_scale", default=1.0, type=float)
 
     # Dataset params
     parser.add_argument("--datasets_dir", type=str, default="./src/data/datasets/")

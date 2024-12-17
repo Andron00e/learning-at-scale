@@ -36,7 +36,7 @@ from optim.shampoo import DistributedShampoo
 from optim.sign import Signum
 from optim.soap import SOAP
 from optim.sophia import SophiaG
-
+from optim.sgd_with_adam import SgdWithAdam, prepare_proj_params
 
 def get_args():
     parser = argparse.ArgumentParser(allow_abbrev=False)
@@ -368,6 +368,22 @@ def main(args, parser):
             weight_decay=args.weight_decay,
             adam=False,
             bias_correction=args.lamb_use_bias_correction,
+        )
+    elif args.opt == "sgd_with_adam":
+        param_groups = prepare_proj_params(model, proj_norms=args.proj_norms, 
+                                       proj_embeds=args.proj_embeds, proj_logits=args.proj_logits)
+        opt = SgdWithAdam(
+            param_groups, 
+            lr = args.lr * args.sgd_lr_scale,
+            momentum = args.momentum,
+            dampening = args.dampening,
+            weight_decay = args.weight_decay,
+            nesterov = args.nesterov,
+            sign = args.sgd_sign_update,
+            sign_norm = args.sign_norm,
+            normalized = args.normalized,
+            adam_lr = args.lr,
+            adam_betas = (args.beta1, args.beta2),
         )
     else:
         opt = torch.optim.SGD(
