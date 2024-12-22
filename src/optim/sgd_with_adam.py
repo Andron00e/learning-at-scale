@@ -452,7 +452,7 @@ def _single_tensor_sgd_advanced(
     for i, param in enumerate(params):
         grad = grads[i]
         if sign:
-            grad.sign_()
+            grad = grad.sign()
         param.add_(grad, alpha=-lr)
 
 
