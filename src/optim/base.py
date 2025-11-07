@@ -1,16 +1,23 @@
 import copy
+import math
 import time
 from contextlib import nullcontext
 from pathlib import Path
 
 import torch
+import wandb
 import yaml
 
-import wandb
+from logger.logger import DynamicsLogger
+from optim.weight_averaging import (ExponentialWeightAverager, WeightAverager,
+                                    eval_ewa, eval_wa)
 
-# from logger.logger import DynamicsLogger
-from .utils import (eval, get_batch, load_checkpoint, load_worker_state,
-                    save_checkpoint, save_worker_state)
+from .schedule import (update_weight_decay, wd_cosine_schedule,
+                       wd_linear_schedule, wd_stable_decay_schedule,
+                       wd_wsd_schedule)
+from .utils import (eval, get_batch, get_parameter_norms, load_checkpoint,
+                    load_worker_state, log_prodigy_lr, save_checkpoint,
+                    save_worker_state, visualize_routing)
 
 
 def train(
@@ -56,15 +63,43 @@ def train(
     else:
         curr_iter = 0
 
-    # if distributed_backend.is_master_process() and cfg.log_dynamics:
-    #     with open(cfg.dynamics_logger_cfg, "r") as f:
-    #         dlcfg = yaml.safe_load(f)
+    if cfg.weight_average:
+        # This does generally not support resuming training, but will work if
+        # cfg.wa_interval perfectly divides the iteration number of the chkpt.
+        # Otherwise, the first avg will not be correctly computed, with a bias
+        # towards the first sample and missing values for earlier iterations.
+        weight_averager = WeightAverager(
+            not_compiled_model,
+            horizon=cfg.wa_horizon,
+            interval=cfg.wa_interval,
+            save_dir=None if cfg.wa_use_temp_dir else exp_dir / "avgs",
+            dtype={
+                "float32": torch.float32,
+                "float64": torch.float64,
+            }[cfg.wa_dtype],
+            count=curr_iter,
+        )
+    if cfg.exponential_weight_average:
+        ewa = ExponentialWeightAverager(
+            not_compiled_model,
+            interval=cfg.ewa_interval,
+            decay=cfg.ewa_decay,
+            warmup=cfg.warmup_steps if cfg.ewa_after_warmup else 0,
+            dtype={
+                "float32": torch.float32,
+                "float64": torch.float64,
+            }[cfg.wa_dtype],
+        )
 
-    #     # Hooks into optimizer
-    #     dlogger = DynamicsLogger(
-    #         model, opt, dlcfg, cfg.results_base_folder, wandb=cfg.wandb
-    #     )
-    #     dlogger.iteration = curr_iter
+    if distributed_backend.is_master_process() and cfg.log_dynamics:
+        with open(cfg.dynamics_logger_cfg, "r") as f:
+            dlcfg = yaml.safe_load(f)
+
+        # Hooks into optimizer
+        dlogger = DynamicsLogger(
+            model, opt, dlcfg, cfg.results_base_folder, wandb=cfg.wandb
+        )
+        dlogger.iteration = curr_iter
 
     substep = curr_iter * cfg.acc_steps
     train_reader, val_reader = datareaders["train"], datareaders["val"]
@@ -111,6 +146,30 @@ def train(
                 full_eval=(curr_iter in cfg.full_eval_at),
             )
 
+            if curr_iter > cfg.wa_interval and cfg.weight_average:
+                eval_wa(
+                    curr_iter,
+                    not_compiled_model,
+                    weight_averager,
+                    val_reader,
+                    type_ctx,
+                    distributed_backend,
+                    cfg,
+                    full_eval=(curr_iter in cfg.full_eval_at),
+                )
+
+            if cfg.exponential_weight_average:
+                eval_ewa(
+                    curr_iter,
+                    not_compiled_model,
+                    ewa,
+                    val_reader,
+                    type_ctx,
+                    distributed_backend,
+                    cfg,
+                    full_eval=(curr_iter in cfg.full_eval_at),
+                )
+
         if curr_iter == cfg.iterations:
             # Save checkpoints and evaluate at final iteration, but no need to train further
             break
@@ -125,7 +184,7 @@ def train(
                     microstep_idx=microstep_idx,
                     gradient_accumulation_steps=cfg.acc_steps,
                 ):
-                    outputs = model(x, targets=y)
+                    outputs = model(x, targets=y, moe=cfg.moe)
 
             loss = outputs["loss"] / cfg.acc_steps
             loss.backward()
@@ -142,6 +201,44 @@ def train(
                 )
             grad_norms.append(grad_norm)
 
+        # weight decay scheduler
+        if cfg.weight_decay_scheduler:
+            if cfg.weight_decay_scheduler == "linear":
+                lambda_wd = wd_linear_schedule(
+                    n_iterations=cfg.iterations,
+                    init_wd=cfg.weight_decay,
+                    final_wd=cfg.final_weight_decay,
+                )
+            elif cfg.weight_decay_scheduler == "cos":
+                lambda_wd = wd_cosine_schedule(
+                    n_iterations=cfg.iterations,
+                    init_wd=cfg.weight_decay,
+                    final_wd=cfg.final_weight_decay,
+                )
+            elif cfg.weight_decay_scheduler == "stable-decay":
+                lambda_wd = wd_stable_decay_schedule(
+                    n_iterations=cfg.iterations,
+                    init_wd=cfg.weight_decay,
+                    final_wd=cfg.final_weight_decay,
+                    fract_decay=cfg.wsd_fract_decay,
+                    decay_type=cfg.decay_type,
+                )
+            elif cfg.weight_decay_scheduler == "wsd":
+                lambda_wd = wd_wsd_schedule(
+                    n_iterations=cfg.iterations,
+                    init_wd=cfg.weight_decay,
+                    final_wd=cfg.final_weight_decay,
+                    n_warmup=cfg.warmup_steps,
+                    init_div_factor=1e2,
+                    fract_decay=cfg.wsd_fract_decay,
+                    decay_type=cfg.decay_type,
+                )
+            else:
+                raise ValueError(f"scheduler type {cfg.scheduler_wd} not recognized.")
+
+            wd_term = lambda_wd(curr_iter)
+            update_weight_decay(opt, wd_term)
+
         if cfg.opt == "sf-sgd" or cfg.opt == "sf-adamw":
             opt.train()
         (
@@ -153,7 +250,7 @@ def train(
             scheduler.step()
         if cfg.opt == "sophiag":
             opt.zero_grad(set_to_none=True)
-            if curr_iter % 10 == 10 - 1:
+            if curr_iter % cfg.precondition_frequency == cfg.precondition_frequency - 1:
                 sample_again = model(x, targets=y, get_logits=True)
                 samp_dist = torch.distributions.Categorical(
                     logits=sample_again["logits"]
@@ -173,7 +270,14 @@ def train(
             opt.update_last_grad()
         else:
             opt.zero_grad(set_to_none=True)
-        # opt.zero_grad(set_to_none=True)
+
+        if cfg.weight_average:
+            weight_averager.step(
+                not_compiled_model, distributed_backend.is_master_process()
+            )
+        if cfg.exponential_weight_average:
+            ewa.step(not_compiled_model, distributed_backend.is_master_process())
+
         dt = (time.perf_counter_ns() - t_start) / 1e9
 
         curr_iter += 1
@@ -184,30 +288,50 @@ def train(
             and distributed_backend.is_master_process()  # Only log on master rank
         ):
             train_loss = loss.detach().cpu().item() * cfg.acc_steps
+            train_aux_losses = {
+                f"train/{k}": v for k, v in outputs["aux_losses"].items()
+            }
 
             current_lrs = [param_group["lr"] for param_group in opt.param_groups]
+
+            if cfg.opt == "prodigy":
+                prodigy_efective_lrs = log_prodigy_lr(opt)
 
             print(
                 f"Train: Iter={curr_iter} ({epoch:0.3f} epochs) "
                 f"train_loss={train_loss:.3f} iter_dt={dt:.2e}s "
                 f"lr={current_lrs[0]:.2e}"
             )
+            if cfg.opt == "prodigy":
+                print(f"effective_lr={prodigy_efective_lrs[0]:.2e}")
 
             if cfg.wandb:
-                wandb.log(
-                    {
-                        "tokens": tokens,
-                        "iter": curr_iter,
-                        "train/loss": train_loss,
-                        "train/perplexity": 2.71828**train_loss,
-                        "lr": current_lrs[0],
-                        "iter_dt": dt,
-                        "max_grad_norm": max(grad_norms).item() if grad_norms else 0,
-                        "mean_grad_norm": (
-                            torch.tensor(grad_norms).mean().item() if grad_norms else 0
-                        ),
-                    }
-                )
+                wandb_logs = {
+                    "tokens": tokens,
+                    "iter": curr_iter,
+                    "train/loss": train_loss,
+                    "train/perplexity": 2.71828**train_loss,
+                    "lr": current_lrs[0],
+                    "iter_dt": dt,
+                    "max_grad_norm": max(grad_norms).item() if grad_norms else 0,
+                    "mean_grad_norm": (
+                        torch.tensor(grad_norms).mean().item() if grad_norms else 0
+                    ),
+                    **train_aux_losses,
+                }
+
+                if cfg.weight_decay_scheduler:
+                    wandb_logs["wd"] = opt.param_groups[0]["weight_decay"]
+
+                if cfg.opt == "prodigy":
+                    wandb_logs["effective_lr"] = prodigy_efective_lrs[0]
+
+                if cfg.log_parameter_norms:
+                    raw_model = distributed_backend.get_raw_model(model)
+                    model_norm = get_parameter_norms(raw_model, order=cfg.norm_order)
+                    wandb_logs["model_norm"] = model_norm
+
+                wandb.log(wandb_logs)
 
             grad_norms = []
 
@@ -242,12 +366,14 @@ def eval_and_log(
     # to make sure we start from the beginning of the validation set,
     # i.e. repeat the same batches
     val_reader.set_step(0)
-    val_acc, val_loss, val_perplexity = eval(
+    val_acc, val_loss, val_perplexity, val_aux_losses, router_logits = eval(
         model,
         val_reader,
         cfg.device,
         max_num_batches=max_num_batches,
         ctx=type_ctx,
+        moe=cfg.moe,
+        get_router_logits=cfg.moe and cfg.plot_router_logits,
         cfg=cfg,
     )
 
@@ -266,6 +392,7 @@ def eval_and_log(
                 "final-val/loss": val_loss,
                 "final-val/perplexity": val_perplexity,
                 "final-val/acc": val_acc,
+                **val_aux_losses,
             }
         else:
             logs = {
@@ -274,7 +401,11 @@ def eval_and_log(
                 "val/loss": val_loss,
                 "val/perplexity": val_perplexity,
                 "val/acc": val_acc,
+                **val_aux_losses,
             }
+        if cfg.moe and cfg.plot_router_logits:
+            routing_logs = visualize_routing(router_logits, cfg)
+            logs = {**logs, **routing_logs}
 
         wandb.log(logs)
         if cfg.eval_seq_prefix != "none" and (
