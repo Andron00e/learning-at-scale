@@ -201,21 +201,25 @@ The structure of the project is the following:
 
 ```sh
 src/
-    main.py         # pick the right data, model, and training function
+    main.py         # pick the right data, model, optimizer, and training function
     config/
         __init__.py # contains CONFIG_FORMAT_TO_MODULE_MAP mapping the name given to the --config_format flag with a python conf file
         base.py     # config for the base model
     data/
         utils.py    # contains the get_dataset function
-        wikitext.py # load/process wikitext
-        arxiv.py    # load/process arxiv
-        fineweb.py # load/process the Fineweb dataset
+        fineweb.py # load/process fineweb
+        fineweb_edu.py    # load/process fineweb edu
+        shakespeare.py # load/process the Shakespeare dataset
+        benchmarks.py # load/process benchs, e.g., hellaswag, gsm8k, arc_challenge
+        c4.py # load/process the c4 dataset
         slimpajama.py
         ...
     models/
         utils.py    # contains the get_model function
         base.py     # contains the standard transformer base architecture
         llama.py    # llama architecture
+        mup.py # implementation of muP
+        mup_llama.py # muP-styled llama architecture
     optim/
         utils.py    # contains eval and get_batch functions
         base.py     # training function for the base and llama models
