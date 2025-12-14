@@ -103,6 +103,10 @@ def parse_args(base_parser, args, namespace):
             "scion-light",
             "d-muon",
             "muon-pytorch",  # works only with torch>=2.9
+            "simademamix",
+            "simademamix2",
+            "mu2mars",
+            "spadamw",
         ],
     )
     parser.add_argument("--batch_size", default=50, type=int)
@@ -160,6 +164,16 @@ def parse_args(base_parser, args, namespace):
     parser.add_argument("--scion_lmh_scale", default=10.0, type=float)
     parser.add_argument("--scion_emb_scale", default=1.0, type=float)
     parser.add_argument("--scion_tr_scale", default=3.0, type=float)
+    parser.add_argument("--sp_clip_start", default=10.0, type=float)
+    parser.add_argument("--sp_clip_end", default=10.0, type=float)
+    parser.add_argument("--sp_normalize", default=False, type=bool)
+    parser.add_argument("--mu_beta3", default=0.9, type=float)
+    parser.add_argument("--mu_beta3_1d", default=0.9, type=float)
+    parser.add_argument(
+        "--sp_clip_mode",
+        default="cos",
+        choices=["linear", "cos", "exp",],
+    )
     parser.add_argument(
         "--weight_average", action="store_true"
     )  # uniform weight averaging (or SWA)
