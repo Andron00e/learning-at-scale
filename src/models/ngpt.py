@@ -13,8 +13,8 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-from models.llama import precompute_freqs_cis, apply_rotary_emb
 from models.base import CausalSelfAttention, GPTBase
+from models.llama import apply_rotary_emb, precompute_freqs_cis
 from models.moe import MoE
 
 
@@ -33,8 +33,10 @@ def _reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor) -> torch.Te
     return freqs_cis.view(*shape)
 
 
-class EmbeddingNorm(nn.Module): # ngpt change here!
-    def __init__(self, dim: int = None, eps: float = 1e-6, rms: bool = False, gain: bool = False):
+class EmbeddingNorm(nn.Module):  # ngpt change here!
+    def __init__(
+        self, dim: int = None, eps: float = 1e-6, rms: bool = False, gain: bool = False
+    ):
         super().__init__()
         self.eps = eps
         self.rms = rms
@@ -69,11 +71,11 @@ class NormalizedMLP(nn.Module):
             (hidden_dim + config.multiple_of - 1) // config.multiple_of
         )
 
-        self.n_embd = config.n_embd # ngpt change here!
+        self.n_embd = config.n_embd  # ngpt change here!
         self.w_u = nn.Linear(config.n_embd, hidden_dim, bias=False)
-        self.s_u = nn.Parameter(torch.ones(hidden_dim)) # ngpt change here!
+        self.s_u = nn.Parameter(torch.ones(hidden_dim))  # ngpt change here!
         self.w_nu = nn.Linear(config.n_embd, hidden_dim, bias=False)
-        self.s_nu = nn.Parameter(torch.ones(hidden_dim)) # ngpt change here!
+        self.s_nu = nn.Parameter(torch.ones(hidden_dim))  # ngpt change here!
         self.c_proj = nn.Linear(hidden_dim, config.n_embd, bias=False)
 
     def forward(self, x):
@@ -81,7 +83,7 @@ class NormalizedMLP(nn.Module):
         u = self.w_u(x) * self.s_u
         nu = self.w_nu(x) * self.s_nu * math.sqrt(self.n_embd)
         return self.c_proj(nn.functional.silu(nu) * u), {}
-    
+
 
 class NormalizedAttention(CausalSelfAttention):
     def __init__(self, config):
@@ -89,7 +91,7 @@ class NormalizedAttention(CausalSelfAttention):
         self.q_norm = EmbeddingNorm()
         self.k_norm = EmbeddingNorm()
         self.s_qk = nn.Parameter(torch.ones(config.n_embd))
-    
+
     def forward(self, x, freqs_cis):
         # batch size, sequence length, embedding dimensionality (n_embd)
         (
@@ -109,8 +111,12 @@ class NormalizedAttention(CausalSelfAttention):
 
         # nGPT apply token normalization to q, k and scale with the same gain
         # Note that this is done after the rotary embeddings
-        q = self.q_norm(q) * self.s_qk.view(1, self.n_head, 1, C // self.n_head) # ngpt change here!
-        k = self.k_norm(k) * self.s_qk.view(1, self.n_head, 1, C // self.n_head) # ngpt change here!
+        q = self.q_norm(q) * self.s_qk.view(
+            1, self.n_head, 1, C // self.n_head
+        )  # ngpt change here!
+        k = self.k_norm(k) * self.s_qk.view(
+            1, self.n_head, 1, C // self.n_head
+        )  # ngpt change here!
 
         # (B, nh, T, hs)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
@@ -119,12 +125,17 @@ class NormalizedAttention(CausalSelfAttention):
         if self.flash:
             # efficient attention using Flash Attention CUDA kernels
             y = torch.nn.functional.scaled_dot_product_attention(
-                q, k, v, attn_mask=None, dropout_p=self.dropout, is_causal=True,
-                scale=math.sqrt(k.size(-1))
+                q,
+                k,
+                v,
+                attn_mask=None,
+                dropout_p=self.dropout,
+                is_causal=True,
+                scale=math.sqrt(k.size(-1)),
             )
         else:
             # manual implementation of attention
-            att = (q @ k.transpose(-2, -1)) * math.sqrt(k.size(-1)) # ngpt change here!
+            att = (q @ k.transpose(-2, -1)) * math.sqrt(k.size(-1))  # ngpt change here!
             att = att.masked_fill(self.bias[:, :, :T, :T] == 0, float("-inf"))
             att = F.softmax(att, dim=-1)
             att = self.attn_dropout(att)
@@ -136,9 +147,9 @@ class NormalizedAttention(CausalSelfAttention):
         # output projection
         y = self.resid_dropout(self.c_proj(y))
         return y
-    
 
-class NormalizedBlock(nn.Module): # ngpt change here!
+
+class NormalizedBlock(nn.Module):  # ngpt change here!
     def __init__(self, config):
         super().__init__()
         self.attn = NormalizedAttention(config)
@@ -150,7 +161,7 @@ class NormalizedBlock(nn.Module): # ngpt change here!
             self.mlp = MoE(config, NormalizedMLP)
         else:
             self.mlp = NormalizedMLP(config)
-        
+
         self.mlp_out_norm = EmbeddingNorm()
         self.mlp_add_norm = EmbeddingNorm()
         self.alpha_m = nn.Parameter(torch.full((config.n_embd,), 0.05))
@@ -159,16 +170,16 @@ class NormalizedBlock(nn.Module): # ngpt change here!
         attn_out = self.attn_out_norm(self.attn(x, freqs_cis))
         x = (1 - self.alpha_a) * x + self.alpha_a * attn_out
         x = self.attn_add_norm(x)
-        
+
         x_, logits_and_experts = self.mlp(x)
         # we do not normalize MoE logits
         x_ = self.mlp_out_norm(x_)
         x = (1 - self.alpha_m) * x + self.alpha_m * x_
         x = self.mlp_add_norm(x)
         return x, logits_and_experts
-    
 
-class NormalizedGPT(GPTBase): # ngpt change here!
+
+class NormalizedGPT(GPTBase):  # ngpt change here!
     def __init__(self, config):
         super().__init__(config)
         assert config.vocab_size is not None
@@ -184,7 +195,9 @@ class NormalizedGPT(GPTBase): # ngpt change here!
             dict(
                 wte=nn.Embedding(config.vocab_size, config.n_embd),
                 drop=nn.Dropout(config.dropout),
-                h=nn.ModuleList([NormalizedBlock(config) for _ in range(config.n_layer)]),
+                h=nn.ModuleList(
+                    [NormalizedBlock(config) for _ in range(config.n_layer)]
+                ),
             )
         )
 
@@ -198,7 +211,9 @@ class NormalizedGPT(GPTBase): # ngpt change here!
                 self.lm_head.weight
             )  # https://paperswithcode.com/method/weight-tying
 
-        self.s_z = nn.Parameter(torch.full((config.vocab_size,), config.s_z_init)) # ngpt change here!
+        self.s_z = nn.Parameter(
+            torch.full((config.vocab_size,), config.s_z_init)
+        )  # ngpt change here!
 
         # init all weights
         self.apply(self._init_weights)
@@ -213,7 +228,7 @@ class NormalizedGPT(GPTBase): # ngpt change here!
                     p.mul_(std / p.std())
 
     @torch.no_grad()
-    def _init_weights(self, module): # ngpt change here!
+    def _init_weights(self, module):  # ngpt change here!
         if isinstance(module, nn.Linear):
             # out_dim in_dim
             torch.nn.init.normal_(module.weight, mean=0.0)
@@ -225,8 +240,8 @@ class NormalizedGPT(GPTBase): # ngpt change here!
             torch.nn.init.normal_(module.weight, mean=0.0)
             module.weight.div_(module.weight.square().sum(dim=1, keepdim=True).sqrt())
         # Keep the custom init of the gains in NormalizedBlock (0.05), NormalizedMLP (1), EmbeddingNorm (1), NormalizedGPT (1)
-    
-    def get_parameter_group_specs(self, config): # ngpt change here!
+
+    def get_parameter_group_specs(self, config):  # ngpt change here!
         """
         This long function is unfortunately doing something very simple and is being very defensive:
         We are separating out all parameters of the model into two buckets: those that will experience
@@ -239,7 +254,9 @@ class NormalizedGPT(GPTBase): # ngpt change here!
         standard_params = []
 
         for mn, m in self.named_modules():
-            for pn, p in m.named_parameters(recurse=False): # only look at direct params
+            for pn, p in m.named_parameters(
+                recurse=False
+            ):  # only look at direct params
                 fpn = "%s.%s" % (mn, pn) if mn else pn  # full param name
                 # random note: because named_modules and named_parameters are recursive
                 # we will see the same tensors p many many times. but doing it this way
@@ -262,21 +279,23 @@ class NormalizedGPT(GPTBase): # ngpt change here!
 
         # validate that we considered every parameter
         all_params = set(self.parameters(recurse=True))
-        assigned_params = set(accelerated_gains_1 + accelerated_gains_2 + standard_params)
+        assigned_params = set(
+            accelerated_gains_1 + accelerated_gains_2 + standard_params
+        )
         assert (
             all_params == assigned_params
         ), "every parameter in the model must be assigned to exactly one optimizer group"
-        assert (
-            len(assigned_params) == len(accelerated_gains_1) + len(accelerated_gains_2) + len(standard_params)
-        ), "parameters should not be duplicated across groups"
+        assert len(assigned_params) == len(accelerated_gains_1) + len(
+            accelerated_gains_2
+        ) + len(standard_params), "parameters should not be duplicated across groups"
 
         # create the pytorch optimizer object
         return [
             {"params": standard_params},
-            {"params": accelerated_gains_1, "lr_scale": self.config.n_embd ** 0.5},
-            {"params": accelerated_gains_2, "lr_scale": 0.05 * self.config.n_embd ** 0.5},
+            {"params": accelerated_gains_1, "lr_scale": self.config.n_embd**0.5},
+            {"params": accelerated_gains_2, "lr_scale": 0.05 * self.config.n_embd**0.5},
         ]
-    
+
     def get_num_params(self, non_embedding=True):
         """
         Return the number of parameters in the model.
@@ -317,7 +336,7 @@ class NormalizedGPT(GPTBase): # ngpt change here!
         aux_losses = {}
         if targets is not None:
             # if we are given some desired targets also calculate the loss
-            logits = self.lm_head(x) * self.s_z # ngpt change here!
+            logits = self.lm_head(x) * self.s_z  # ngpt change here!
             loss = F.cross_entropy(
                 logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1
             )
@@ -340,7 +359,7 @@ class NormalizedGPT(GPTBase): # ngpt change here!
             logits = self.lm_head(
                 x[:, [-1], :]
             )  # note: using list [-1] to preserve the time dim
-            logits = logits * self.s_z # ngpt change here!
+            logits = logits * self.s_z  # ngpt change here!
             loss = None
 
         logits = logits if get_logits else None

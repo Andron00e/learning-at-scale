@@ -347,7 +347,7 @@ def main(args, parser):
             group_specs,
             lr=args.lr,
             betas=(args.beta1, args.beta2),
-            lr_scale=1.0, # default value
+            lr_scale=1.0,  # default value
         )
     else:
         opt = torch.optim.SGD(
