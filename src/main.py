@@ -30,6 +30,7 @@ from optim.scion import Scion, ScionLight, scion_partitions
 from optim.sign import Signum
 from optim.soap import SOAP
 from optim.sophia import SophiaG
+from optim.unitadam import UnitAdam
 
 
 def get_args():
@@ -340,6 +341,13 @@ def main(args, parser):
             ),  # someone might try to change it later
             eps=1e-7,  # muon pytorch uses smaller eps
             adjust_lr_fn=None,  # to make the orthogonalized update have a consistent RMS across rectangular matrices
+        )
+    elif args.opt == "unitadam":
+        opt = UnitAdam(
+            group_specs,
+            lr=args.lr,
+            betas=(args.beta1, args.beta2),
+            lr_scale=1.0, # default value
         )
     else:
         opt = torch.optim.SGD(

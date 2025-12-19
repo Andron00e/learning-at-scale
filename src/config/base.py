@@ -103,6 +103,7 @@ def parse_args(base_parser, args, namespace):
             "scion-light",
             "d-muon",
             "muon-pytorch",  # works only with torch>=2.9
+            "unitadam",
         ],
     )
     parser.add_argument("--batch_size", default=50, type=int)
@@ -256,6 +257,7 @@ def parse_args(base_parser, args, namespace):
             "llama",
             "mup_gpt",
             "mup_llama",
+            "ngpt",
         ],
     )
     parser.add_argument("--parallel_block", action="store_true")
@@ -328,5 +330,7 @@ def parse_args(base_parser, args, namespace):
     )  # mup arguments --- the base model width that mup has been configured on
     parser.add_argument("--scale_base_model", default=256, type=int)
     parser.add_argument("--scale_depth", default=1.4, type=float)
+    # ngpt arguments
+    parser.add_argument("--s_z_init", default=1.0, type=float)
 
     return parser.parse_args(args, namespace)
