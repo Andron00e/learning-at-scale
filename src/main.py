@@ -487,6 +487,7 @@ def get_exp_name(
         "distributed_backend",
         "latest_ckpt_interval",
         "permanent_ckpt_interval",
+        "datasets_dir",
         "wandb",
         "wandb_project",
         "wandb_entity",
@@ -512,8 +513,16 @@ def get_exp_name(
         # "ewa_decay",
         # "ewa_after_warmup",
         "moe",
+        "log_interval",
+        "log_parameter_norms",
+        "log_dynamics",
+        "experiment_name",
     ],
 ):
+    # Set the custom exp name if needed
+    if args.experiment_name is not None:
+        return args.experiment_name
+    
     # Get the default values
     defaults = vars(parser.parse_args([]))
 
