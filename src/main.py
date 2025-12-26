@@ -30,7 +30,15 @@ from optim.scion import Scion, ScionLight, scion_partitions
 from optim.sign import Signum
 from optim.soap import SOAP
 from optim.sophia import SophiaG
-from optim.unitadam import UnitAdam
+from optim.unit_optimizers import (
+    UnitAdam, 
+    UnitSGD, 
+    UnitAdEMAMix,
+    UnitDistributedMuon,
+    UnitSOAP,
+    UnitProdigy,
+    UnitAdamWScheduleFree,
+)
 
 
 def get_args():
@@ -347,7 +355,80 @@ def main(args, parser):
             group_specs,
             lr=args.lr,
             betas=(args.beta1, args.beta2),
-            lr_scale=1.0,  # default value
+            lr_scale=args.lr_scale,  # default value 1.0
+        )
+    elif args.opt == "unitsgd":
+        opt = UnitSGD(
+            group_specs,
+            lr=args.lr,
+            momentum=args.momentum,
+            dampening=args.dampening,
+            nesterov=args.nesterov,
+            weight_decay=args.weight_decay,  # better ignore for unit optimizers
+            sign_update=False,
+        )
+    elif args.opt == "unitademamix":
+        opt = UnitAdEMAMix(
+            group_specs,
+            lr=args.lr,
+            lr_scale=args.lr_scale,
+            betas=(args.beta1, args.beta2, args.adema_beta3),
+            alpha=args.adema_alpha,
+            beta3_warmup=args.adema_beta3_warmup,
+            alpha_warmup=args.adema_alpha_warmup,
+            weight_decay=args.weight_decay,  # better ignore for unit optimizers
+        )
+    elif args.opt == "unitmuon":
+        opt = UnitDistributedMuon(
+            group_specs,
+            lr=args.lr,
+            lr_scale=args.lr_scale,
+            weight_decay=args.weight_decay,  # better ignore for unit optimizers
+            momentum=args.momentum,
+            nesterov=args.nesterov,
+            ns_steps=args.muon_ns_steps,
+            adamw_betas=(args.beta1, args.beta2),
+            adamw_eps=1e-8,
+        )
+    elif args.opt == "unitsoap":
+        opt = UnitSOAP(
+            group_specs,
+            lr=args.lr,
+            lr_scale=args.lr_scale,
+            weight_decay=args.weight_decay,  # better ignore for unit optimizers
+            betas=(args.beta1, args.beta2),
+            shampoo_beta=args.shampoo_beta,
+            precondition_frequency=args.precondition_frequency,
+            max_precond_dim=args.max_precond_dim,
+            merge_dims=args.merge_dims,
+            precondition_1d=args.precondition_1d,
+            normalize_grads=args.normalize_grads,
+            data_format=args.soap_data_format,
+            correct_bias=args.correct_bias,
+        )
+    elif args.opt == "unitprodigy":
+        opt = UnitProdigy(
+            group_specs,
+            lr=args.lr,
+            lr_scale=args.lr_scale,
+            weight_decay=args.weight_decay,  # better ignore for unit optimizers
+            betas=(args.beta1, args.beta2),
+            beta3=args.prodigy_beta3,
+            decouple=args.prodigy_decouple,
+            use_bias_correction=args.prodigy_use_bias_correction,
+            safeguard_warmup=args.prodigy_safeguard_warmup,
+            fsdp_in_use=args.prodigy_fsdp_in_use,
+        )
+    elif args.opt == "unit-sf-adamw":
+        opt = UnitAdamWScheduleFree(
+            group_specs,
+            lr=args.lr,
+            lr_scale=args.lr_scale,
+            weight_decay=args.weight_decay,  # better ignore for unit optimizers
+            betas=(args.beta1, args.beta2),
+            warmup_steps=args.warmup_steps,
+            r=args.schedulefree_r,
+            weight_lr_power=args.weight_lr_power,
         )
     else:
         opt = torch.optim.SGD(

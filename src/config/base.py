@@ -104,6 +104,12 @@ def parse_args(base_parser, args, namespace):
             "d-muon",
             "muon-pytorch",  # works only with torch>=2.9
             "unitadam",
+            "unitsgd",
+            "unitademamix",
+            "unitmuon",
+            "unitsoap",
+            "unitprodigy",
+            "unit-sf-adamw",
         ],
     )
     parser.add_argument("--batch_size", default=50, type=int)
@@ -161,6 +167,7 @@ def parse_args(base_parser, args, namespace):
     parser.add_argument("--scion_lmh_scale", default=10.0, type=float)
     parser.add_argument("--scion_emb_scale", default=1.0, type=float)
     parser.add_argument("--scion_tr_scale", default=3.0, type=float)
+    parser.add_argument("--lr_scale", default=1.0, type=float)
     parser.add_argument(
         "--weight_average", action="store_true"
     )  # uniform weight averaging (or SWA)

@@ -220,9 +220,12 @@ def load_worker_state(ckpt_dir: Path):
     random.setstate(worker_state["rng_python"])
 
 
-def get_parameter_norms(model, order=2):
+def get_parameter_norms(model, order=2, only_2d=False):
     model_norm = 0
     for p in model.parameters():
+        if only_2d and p.dim() < 2:
+            continue
+        
         param_data = p.detach().data
         if order == float("inf"):
             param_norm = param_data.norm(p=order)

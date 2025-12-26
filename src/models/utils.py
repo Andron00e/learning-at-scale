@@ -4,6 +4,7 @@ from .base import GPTBase, LayerNorm
 from .llama import Llama, RMSNorm
 from .mup import MuPGPTBase
 from .mup_llama import MuPLlama
+from .ngpt import NormalizedGPT
 
 BLACKLIST_WEIGHT_MODULES = (
     torch.nn.LayerNorm,
@@ -40,6 +41,9 @@ def get_model(args):
             raise NotImplementedError(
                 f"Loading of pretrained models not yet implemented for model '{args.model}'."
             )
+        return model
+    elif args.model == "ngpt":
+        model = NormalizedGPT(args)
         return model
     else:
         raise KeyError(f"Unknown model '{args.model}'.")

@@ -18,19 +18,19 @@ from models.llama import apply_rotary_emb, precompute_freqs_cis
 from models.moe import MoE
 
 
-def _reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
-    """
-    freqs_cis: complex - (seq_len, head_dim / 2)
-    x: complex - (bsz, seq_len, head_dim / 2)
-    """
-    ndim = x.ndim
-    assert 1 < ndim
-    assert freqs_cis.shape[:-1] == (x.shape[1], x.shape[-2])
-    # New shape for broadcasting
-    shape = [
-        1 if i != 1 and i != ndim - 2 else d for i, d in enumerate(x.shape[:-1])
-    ] + [2]
-    return freqs_cis.view(*shape)
+# def _reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+#     """
+#     freqs_cis: complex - (seq_len, head_dim / 2)
+#     x: complex - (bsz, seq_len, head_dim / 2)
+#     """
+#     ndim = x.ndim
+#     assert 1 < ndim
+#     assert freqs_cis.shape[:-1] == (x.shape[1], x.shape[-2])
+#     # New shape for broadcasting
+#     shape = [
+#         1 if i != 1 and i != ndim - 2 else d for i, d in enumerate(x.shape[:-1])
+#     ] + [2]
+#     return freqs_cis.view(*shape)
 
 
 class EmbeddingNorm(nn.Module):  # ngpt change here!
@@ -249,9 +249,9 @@ class NormalizedGPT(GPTBase):  # ngpt change here!
         We are then returning the PyTorch optimizer object.
         """
 
-        accelerated_gains_1 = []
-        accelerated_gains_2 = []
-        standard_params = []
+        accelerated_gains_1 = set() # s_qk, s_z (scale: sqrt(d))
+        accelerated_gains_2 = set() # alpha_a, alpha_m (scale: 0.05 * sqrt(d))
+        standard_params = set() # all other params (standard lr)
 
         for mn, m in self.named_modules():
             for pn, p in m.named_parameters(
@@ -263,38 +263,44 @@ class NormalizedGPT(GPTBase):  # ngpt change here!
                 # allows us to know which parent module any tensor p belongs to...
                 if pn in ["s_qk", "s_z"]:
                     # These gains use a higher learning rate of sqrt(dim)
-                    accelerated_gains_1.append(p)
+                    accelerated_gains_1.add(fpn)
                 elif pn in ["alpha_a", "alpha_m"]:
                     # These gains use a higher learning rate of 0.05 * sqrt(dim)
-                    accelerated_gains_2.append(p)
+                    accelerated_gains_2.add(fpn)
                 elif pn in ["s_u", "s_nu"]:
                     # These gains use an unmodified learning rate!
-                    standard_params.append(p)
-                elif "wte" in fpn and not self.config.no_weight_tying:
-                    # Don't add this if we are doing weight tying
-                    pass
+                    standard_params.add(fpn)
+                # elif "wte" in fpn and not self.config.untied_embeds:
+                #     # Don't add this if we are doing weight tying
+                #     pass
                 else:
-                    # Embeddings, standard weight matrices use the standard rate
-                    standard_params.append(p)
-
+                    # embeddings, wte, standard weight matrices use the standard rate
+                    standard_params.add(fpn)
+        
+        if not config.untied_embeds:
+            if "lm_head.weight" in standard_params:
+                standard_params.remove("lm_head.weight")
+        
         # validate that we considered every parameter
-        all_params = set(self.parameters(recurse=True))
-        assigned_params = set(
-            accelerated_gains_1 + accelerated_gains_2 + standard_params
-        )
+        param_dict = {pn: p for pn, p in self.named_parameters()}
+        all_param_names = set(param_dict.keys())
+        assigned_params = accelerated_gains_1 | accelerated_gains_2 | standard_params
+        inter_params = (accelerated_gains_1 & accelerated_gains_2) | \
+                   (accelerated_gains_1 & standard_params) | \
+                   (accelerated_gains_2 & standard_params)
         assert (
-            all_params == assigned_params
-        ), "every parameter in the model must be assigned to exactly one optimizer group"
-        assert len(assigned_params) == len(accelerated_gains_1) + len(
-            accelerated_gains_2
-        ) + len(standard_params), "parameters should not be duplicated across groups"
+            len(inter_params) == 0
+        ), f"parameters {inter_params} assigned to multiple groups"
+        assert (
+        all_param_names == assigned_params
+    ), f"parameters {all_param_names - assigned_params} were not assigned to any group"
 
         # create the pytorch optimizer object
         return [
-            {"params": standard_params},
-            {"params": accelerated_gains_1, "lr_scale": self.config.n_embd**0.5},
-            {"params": accelerated_gains_2, "lr_scale": 0.05 * self.config.n_embd**0.5},
-        ]
+            {"params": sorted(list(standard_params))},
+            {"params": sorted(list(accelerated_gains_1)), "lr_scale": self.config.n_embd**0.5},
+            {"params": sorted(list(accelerated_gains_2)), "lr_scale": 0.05 * self.config.n_embd**0.5},
+    ]
 
     def get_num_params(self, non_embedding=True):
         """

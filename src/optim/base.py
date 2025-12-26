@@ -284,8 +284,10 @@ def train(
 
                 if cfg.log_parameter_norms:
                     raw_model = distributed_backend.get_raw_model(model)
-                    model_norm = get_parameter_norms(raw_model, order=cfg.norm_order)
-                    wandb_logs["model_norm"] = model_norm
+                    total_norm = get_parameter_norms(raw_model, order=cfg.norm_order, only_2d=False)
+                    matrix_norm = get_parameter_norms(raw_model, order=cfg.norm_order, only_2d=True)
+                    wandb_logs["model_norm/total"] = total_norm
+                    wandb_logs["model_norm/matrices"] = matrix_norm
 
                 wandb.log(wandb_logs)
 
