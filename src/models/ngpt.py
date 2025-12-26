@@ -300,7 +300,7 @@ class NormalizedGPT(GPTBase):  # ngpt change here!
             {"params": sorted(list(standard_params))},
             {"params": sorted(list(accelerated_gains_1)), "lr_scale": self.config.n_embd**0.5},
             {"params": sorted(list(accelerated_gains_2)), "lr_scale": 0.05 * self.config.n_embd**0.5},
-    ]
+        ]
 
     def get_num_params(self, non_embedding=True):
         """

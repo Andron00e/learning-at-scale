@@ -198,7 +198,7 @@ def train(
                 )
             grad_norms.append(grad_norm)
 
-        if cfg.opt == "sf-sgd" or cfg.opt == "sf-adamw":
+        if cfg.opt in ["sf-sgd", "sf-adamw", "unit-sf-adamw"]:
             opt.train()
         (
             opt.step()
@@ -313,7 +313,7 @@ def eval_and_log(
         return
 
     model.eval()
-    if cfg.opt == "sf-sgd" or cfg.opt == "sf-adamw":
+    if cfg.opt in ["sf-sgd", "sf-adamw", "unit-sf-adamw"]:
         opt.eval()
 
     if curr_iter == cfg.iterations or full_eval:

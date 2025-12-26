@@ -650,9 +650,11 @@ class UnitDistributedMuon(torch.optim.Optimizer):
                 p.data.mul_(1 - lr * weight_decay)
                 p.data.add_(g, alpha=-lr / scale)
 
+        # Normalize "along the embedding" dimension
+        for group in self.param_groups:
+            for p in group["params"]:
                 if p.dim() == 2:
-                    # Normalize "along the embedding" dimension
-                    p.div_(p.square().sum(dim=1, keepdim=True).sqrt())
+                    p.data.div_(p.data.square().sum(dim=1, keepdim=True).sqrt())
 
 
 class UnitSOAP(torch.optim.Optimizer):
@@ -1167,6 +1169,7 @@ class UnitProdigy(torch.optim.Optimizer):
     def supports_flat_params(self):
         return True
 
+    @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
 
@@ -1198,7 +1201,8 @@ class UnitProdigy(torch.optim.Optimizer):
         else:
             bias_correction = 1
 
-        dlr = d * lr * bias_correction
+        # we will compute dlr on a per-group basis
+        # dlr = d * lr * bias_correction
 
         growth_rate = group["growth_rate"]
         decouple = group["decouple"]
@@ -1215,10 +1219,13 @@ class UnitProdigy(torch.optim.Optimizer):
             d0 = group["d0"]
             safeguard_warmup = group["safeguard_warmup"]
 
-            if group_lr not in [lr, 0.0]:
-                raise RuntimeError(
-                    f"Setting different lr values in different parameter groups is only supported for values of 0"
-                )
+            # remove this check for nGPT
+            # if group_lr not in [lr, 0.0]:
+            #     raise RuntimeError(
+            #         f"Setting different lr values in different parameter groups is only supported for values of 0"
+            #     )
+
+            dlr = d * group_lr * bias_correction # compute dlr for this group
 
             for p in group["params"]:
                 if p.grad is None:
@@ -1307,6 +1314,9 @@ class UnitProdigy(torch.optim.Optimizer):
             k = group["k"]
             eps = group["eps"]
 
+            group_lr = group["lr"] * group["lr_scale"]
+            dlr = d * group_lr * bias_correction  # re-compute dlr for this group
+
             for p in group["params"]:
                 if p.grad is None:
                     continue
@@ -1329,7 +1339,7 @@ class UnitProdigy(torch.optim.Optimizer):
 
                 if p.dim() == 2:
                     # Normalize "along the embedding" dimension
-                    p.div_(p.square().sum(dim=1, keepdim=True).sqrt())
+                    p.data.div_(p.data.square().sum(dim=1, keepdim=True).sqrt())
 
             group["k"] = k + 1
 
