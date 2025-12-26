@@ -7,13 +7,17 @@ In summary, compute the mean across the second dim.
 """
 
 import math
-from .ademamix import linear_hl_warmup_scheduler, linear_warmup_scheduler
-import torch
-from typing import Dict, Tuple, Union, Optional, Iterable, Any, Callable
-from typing_extensions import TypeAlias
 from itertools import chain
+from typing import Any, Callable, Dict, Iterable, Optional, Tuple, Union
+
+import torch
 import torch.distributed as dist
-from .muon import MuonDistMeta, adjust_lr_wd_for_muon, normalize_range, zeropower_via_newtonschulz5
+from typing_extensions import TypeAlias
+
+from .ademamix import linear_hl_warmup_scheduler, linear_warmup_scheduler
+from .muon import (MuonDistMeta, adjust_lr_wd_for_muon, normalize_range,
+                   zeropower_via_newtonschulz5)
+
 try:
     from torch.optim.optimizer import ParamsT
 except ImportError:
@@ -25,6 +29,7 @@ class UnitAdam(torch.optim.Optimizer):
     Implements Adam with Unit Norm Projection.
     Weight decay is omitted.
     """
+
     def __init__(
         self,
         params,
@@ -115,6 +120,7 @@ class UnitAdEMAMix(torch.optim.Optimizer):
     Implements AdEMAMix with Unit Norm Projection.
     Weight decay is omitted.
     """
+
     def __init__(
         self,
         params,
@@ -138,7 +144,9 @@ class UnitAdEMAMix(torch.optim.Optimizer):
         if not 0.0 <= betas[2] < 1.0:
             raise ValueError("Invalid beta parameter at index 2: {}".format(betas[2]))
         if weight_decay != 0:
-            print(f"Warning: UnitAdEMAMix ignores weight_decay (set to {weight_decay}) due to Unit Norm constraint.")
+            print(
+                f"Warning: UnitAdEMAMix ignores weight_decay (set to {weight_decay}) due to Unit Norm constraint."
+            )
         if not 0.0 <= alpha:
             raise ValueError("Invalid alpha value: {}".format(alpha))
         defaults = dict(
@@ -266,6 +274,7 @@ class UnitSGD(torch.optim.Optimizer):
     Implements SGD with Momentum and Unit Norm Projection (Projected SGD).
     If sign_update=True, this becomes UnitSignSGD.
     """
+
     def __init__(
         self,
         params,
@@ -281,7 +290,9 @@ class UnitSGD(torch.optim.Optimizer):
         if momentum < 0.0:
             raise ValueError(f"Invalid momentum value: {momentum}")
         if weight_decay != 0:
-            print(f"Warning: UnitSGD ignores weight_decay (set to {weight_decay}) due to Unit Norm constraint.")
+            print(
+                f"Warning: UnitSGD ignores weight_decay (set to {weight_decay}) due to Unit Norm constraint."
+            )
 
         defaults = dict(
             lr=lr,
@@ -319,20 +330,20 @@ class UnitSGD(torch.optim.Optimizer):
             for p in group["params"]:
                 if p.grad is None:
                     continue
-                
+
                 grad = p.grad
                 state = self.state[p]
 
                 if len(state) == 0:
                     state["step"] = 0
                     state["momentum_buffer"] = torch.clone(grad).detach()
-                
+
                 state["step"] += 1
-                
+
                 if momentum != 0:
                     buf = state["momentum_buffer"]
                     buf.mul_(momentum).add_(grad, alpha=1 - dampening)
-                    
+
                     if nesterov:
                         update_grad = grad.add(buf, alpha=momentum)
                     else:
@@ -349,13 +360,14 @@ class UnitSGD(torch.optim.Optimizer):
                     p.div_(p.square().sum(dim=1, keepdim=True).sqrt())
 
         return loss
-    
+
 
 class UnitDistributedMuon(torch.optim.Optimizer):
     """
     Implements Kimi Muon with Unit Norm Projection.
     Weight decay is omitted.
     """
+
     def __init__(
         self,
         param_groups,
@@ -367,10 +379,12 @@ class UnitDistributedMuon(torch.optim.Optimizer):
         ns_steps=5,
         adamw_betas=(0.95, 0.95),
         adamw_eps=1e-8,
-        lr_scale=1.0
+        lr_scale=1.0,
     ):
         if weight_decay != 0:
-            print(f"Warning: UnitDistributedMuon ignores weight_decay (set to {weight_decay}) due to Unit Norm constraint.")
+            print(
+                f"Warning: UnitDistributedMuon ignores weight_decay (set to {weight_decay}) due to Unit Norm constraint."
+            )
 
         defaults = dict(
             lr=lr,
@@ -662,6 +676,7 @@ class UnitSOAP(torch.optim.Optimizer):
     Implements SOAP with Unit Norm Projection.
     Weight decay is omitted.
     """
+
     def __init__(
         self,
         params,
@@ -680,8 +695,10 @@ class UnitSOAP(torch.optim.Optimizer):
         correct_bias: bool = True,
     ):
         if weight_decay != 0:
-            print(f"Warning: UnitSOAP ignores weight_decay (set to {weight_decay}) due to Unit Norm constraint.")
-        
+            print(
+                f"Warning: UnitSOAP ignores weight_decay (set to {weight_decay}) due to Unit Norm constraint."
+            )
+
         defaults = {
             "lr": lr,
             "betas": betas,
@@ -840,7 +857,12 @@ class UnitSOAP(torch.optim.Optimizer):
                 # of the weights to the loss with plain (non-momentum) SGD.
                 # Add weight decay at the end (fixed version)
                 if group["weight_decay"] > 0.0:
-                    p.add_(p, alpha=(-group["lr"] * group["lr_scale"] * group["weight_decay"]))
+                    p.add_(
+                        p,
+                        alpha=(
+                            -group["lr"] * group["lr_scale"] * group["weight_decay"]
+                        ),
+                    )
 
                 # Update is done after the gradient step to avoid using current gradients in the projection.
                 self.update_preconditioner(
@@ -1135,7 +1157,9 @@ class UnitProdigy(torch.optim.Optimizer):
         if not 0.0 <= betas[1] < 1.0:
             raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
         if weight_decay != 0:
-            print(f"Warning: UnitProdigy ignores weight_decay (set to {weight_decay}) due to Unit Norm constraint.")
+            print(
+                f"Warning: UnitProdigy ignores weight_decay (set to {weight_decay}) due to Unit Norm constraint."
+            )
         if decouple and weight_decay > 0:
             print(f"Using decoupled weight decay")
 
@@ -1225,7 +1249,7 @@ class UnitProdigy(torch.optim.Optimizer):
             #         f"Setting different lr values in different parameter groups is only supported for values of 0"
             #     )
 
-            dlr = d * group_lr * bias_correction # compute dlr for this group
+            dlr = d * group_lr * bias_correction  # compute dlr for this group
 
             for p in group["params"]:
                 if p.grad is None:
@@ -1366,8 +1390,10 @@ class UnitAdamWScheduleFree(torch.optim.Optimizer):
         foreach: Optional[bool] = hasattr(torch, "_foreach_mul_"),
     ):
         if weight_decay != 0:
-            print(f"Warning: UnitAdamWScheduleFree ignores weight_decay (set to {weight_decay}) due to Unit Norm constraint.")
-        
+            print(
+                f"Warning: UnitAdamWScheduleFree ignores weight_decay (set to {weight_decay}) due to Unit Norm constraint."
+            )
+
         defaults = dict(
             lr=lr,
             betas=betas,
@@ -1533,9 +1559,9 @@ class UnitAdamWScheduleFree(torch.optim.Optimizer):
                 if p.dim() == 2:
                     # Normalize the active param y "along the embedding" dimension
                     p.div_(p.square().sum(dim=1, keepdim=True).sqrt())
-                    
+
                     # if we dont do this, the next .lerp() will pull p off the sphere
-                    z = self.state[p]['z']
+                    z = self.state[p]["z"]
                     z.div_(z.square().sum(dim=1, keepdim=True).sqrt())
 
             group["k"] = k + 1

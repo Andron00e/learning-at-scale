@@ -30,15 +30,9 @@ from optim.scion import Scion, ScionLight, scion_partitions
 from optim.sign import Signum
 from optim.soap import SOAP
 from optim.sophia import SophiaG
-from optim.unit_optimizers import (
-    UnitAdam, 
-    UnitSGD, 
-    UnitAdEMAMix,
-    UnitDistributedMuon,
-    UnitSOAP,
-    UnitProdigy,
-    UnitAdamWScheduleFree,
-)
+from optim.unit_optimizers import (UnitAdam, UnitAdamWScheduleFree,
+                                   UnitAdEMAMix, UnitDistributedMuon,
+                                   UnitProdigy, UnitSGD, UnitSOAP)
 
 
 def get_args():
@@ -603,7 +597,7 @@ def get_exp_name(
     # Set the custom exp name if needed
     if args.experiment_name is not None:
         return args.experiment_name
-    
+
     # Get the default values
     defaults = vars(parser.parse_args([]))
 

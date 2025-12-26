@@ -17,7 +17,6 @@ from models.base import CausalSelfAttention, GPTBase
 from models.llama import apply_rotary_emb, precompute_freqs_cis
 from models.moe import MoE
 
-
 # def _reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
 #     """
 #     freqs_cis: complex - (seq_len, head_dim / 2)
@@ -249,9 +248,9 @@ class NormalizedGPT(GPTBase):  # ngpt change here!
         We are then returning the PyTorch optimizer object.
         """
 
-        accelerated_gains_1 = set() # s_qk, s_z (scale: sqrt(d))
-        accelerated_gains_2 = set() # alpha_a, alpha_m (scale: 0.05 * sqrt(d))
-        standard_params = set() # all other params (standard lr)
+        accelerated_gains_1 = set()  # s_qk, s_z (scale: sqrt(d))
+        accelerated_gains_2 = set()  # alpha_a, alpha_m (scale: 0.05 * sqrt(d))
+        standard_params = set()  # all other params (standard lr)
 
         for mn, m in self.named_modules():
             for pn, p in m.named_parameters(
@@ -276,30 +275,38 @@ class NormalizedGPT(GPTBase):  # ngpt change here!
                 else:
                     # embeddings, wte, standard weight matrices use the standard rate
                     standard_params.add(fpn)
-        
+
         if not config.untied_embeds:
             if "lm_head.weight" in standard_params:
                 standard_params.remove("lm_head.weight")
-        
+
         # validate that we considered every parameter
         param_dict = {pn: p for pn, p in self.named_parameters()}
         all_param_names = set(param_dict.keys())
         assigned_params = accelerated_gains_1 | accelerated_gains_2 | standard_params
-        inter_params = (accelerated_gains_1 & accelerated_gains_2) | \
-                   (accelerated_gains_1 & standard_params) | \
-                   (accelerated_gains_2 & standard_params)
+        inter_params = (
+            (accelerated_gains_1 & accelerated_gains_2)
+            | (accelerated_gains_1 & standard_params)
+            | (accelerated_gains_2 & standard_params)
+        )
         assert (
             len(inter_params) == 0
         ), f"parameters {inter_params} assigned to multiple groups"
         assert (
-        all_param_names == assigned_params
-    ), f"parameters {all_param_names - assigned_params} were not assigned to any group"
+            all_param_names == assigned_params
+        ), f"parameters {all_param_names - assigned_params} were not assigned to any group"
 
         # create the pytorch optimizer object
         return [
             {"params": sorted(list(standard_params))},
-            {"params": sorted(list(accelerated_gains_1)), "lr_scale": self.config.n_embd**0.5},
-            {"params": sorted(list(accelerated_gains_2)), "lr_scale": 0.05 * self.config.n_embd**0.5},
+            {
+                "params": sorted(list(accelerated_gains_1)),
+                "lr_scale": self.config.n_embd**0.5,
+            },
+            {
+                "params": sorted(list(accelerated_gains_2)),
+                "lr_scale": 0.05 * self.config.n_embd**0.5,
+            },
         ]
 
     def get_num_params(self, non_embedding=True):
