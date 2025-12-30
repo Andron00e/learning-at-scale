@@ -1,5 +1,5 @@
 """
-Llama style Language Model that is 
+Llama style Language Model that is
 compilable (avoids torch complex)
 """
 

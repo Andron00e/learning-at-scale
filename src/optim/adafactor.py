@@ -1,5 +1,5 @@
 """
-Here is an implementation of Adafactor. 
+Here is an implementation of Adafactor.
 Source: https://github.com/jettify/pytorch-optimizer/blob/master/torch_optimizer/adafactor.py
 """
 

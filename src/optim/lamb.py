@@ -1,5 +1,5 @@
 """
-Here is an official implementation of LAMB. 
+Here is an official implementation of LAMB.
 Source: https://github.com/cybertronai/pytorch-lamb
 """
 

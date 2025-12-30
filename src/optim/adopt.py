@@ -1,5 +1,5 @@
 """
-Here is an original implementation of ADOPT. 
+Here is an original implementation of ADOPT.
 Source: https://github.com/iShohei220/adopt
 """
 

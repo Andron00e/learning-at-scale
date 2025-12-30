@@ -107,6 +107,9 @@ def parse_args(base_parser, args, namespace):
             "simademamix2",
             "mu2mars",
             "spadamw",
+            "nesterov-ademamix",
+            "aggmo",
+            "aggmo2",
         ],
     )
     parser.add_argument("--batch_size", default=50, type=int)

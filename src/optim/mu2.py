@@ -1,10 +1,7 @@
 """
-Here is an original implementation of MARS.
-Source: https://github.com/AGI-Arena/MARS
+Here is an original implementation of Mu2.
 """
 
-# Copyright (c) 2024 Bytedance Ltd. and/or its affiliates
-# SPDX-License-Identifier: Apache-2.0
 import math
 
 import torch
@@ -21,10 +18,12 @@ def update_fn(
     grad,
     exp_avg,
     exp_avg_sq,
+    p_curr,  # mu2 change here!
     lr,
     wd,
     beta1,
     beta2,
+    beta3,  # mu2 change here!
     last_grad,
     eps,
     amsgrad,
@@ -38,7 +37,7 @@ def update_fn(
     betas_1d,
     weight_decay_1d,
 ):
-    # optimize_1d: use MARS for 1d para, not: use AdamW for 1d para
+    # optimize_1d: use Mu2MARS for 1d para, not: use AdamW for 1d para
     if optimize_1d or is_grad_2d:
         c_t = (grad - last_grad).mul(gamma * (beta1 / (1.0 - beta1))).add(grad)
         c_t_norm = torch.norm(c_t)
@@ -48,7 +47,9 @@ def update_fn(
         if (mars_type == "mars-adamw") or (
             mars_type == "mars-shampoo" and not is_grad_2d
         ):
-            exp_avg_sq.mul_(beta2).addcmul_(c_t, c_t, value=1.0 - beta2)
+            exp_avg_sq.mul_(beta2).addcmul_(
+                c_t, c_t, value=1.0 - beta2
+            )  # TODO: mb should we use d_t here?
             bias_correction1 = 1.0 - beta1**step
             bias_correction2 = 1.0 - beta2**step
             if amsgrad:
@@ -57,29 +58,27 @@ def update_fn(
                     max_exp_avg_sq.sqrt()
                     .mul(1 / math.sqrt(bias_correction2))
                     .add(eps)
-                    .mul(bias_correction1)
+                    .mul(
+                        bias_correction1
+                    )  # TODO: mb change here and not multiply by bias_correction1
                 )
             else:
                 denom = (
                     exp_avg_sq.sqrt()
                     .mul(1 / math.sqrt(bias_correction2))
                     .add(eps)
-                    .mul(bias_correction1)
+                    .mul(
+                        bias_correction1
+                    )  # TODO: mb change here and not multiply by bias_correction1
                 )
-            real_update_tmp = -lr * torch.mul(p.data, wd).add(exp_avg.div(denom))
-        elif mars_type == "mars-lion":
-            real_update_tmp = -lr * torch.mul(p.data, wd).add(exp_avg.sign())
-        elif mars_type == "mars-shampoo" and is_grad_2d:
-            factor = max(1, grad.size(0) / grad.size(1)) ** 0.5
-            real_update_tmp = (
-                zeropower_via_newtonschulz5(exp_avg.mul(1.0 / (1.0 - beta1)), eps=eps)
-                .mul(factor)
-                .add(wd, p.data)
-                .mul(-lr)
-            )
-        p.data.add_(real_update_tmp)
+            p_curr_update_tmp = -lr * torch.mul(p_curr.data, wd).add(
+                exp_avg.div(denom)
+            )  # mu2 change here!
+
+        p_curr.data.add_(p_curr_update_tmp)  # mu2 change here!
+        p.data.mul_(beta3).add_(p_curr, alpha=1.0 - beta3)  # mu2 change here!
     else:
-        beta1_1d, beta2_1d = betas_1d
+        beta1_1d, beta2_1d, beta3_1d = betas_1d
         exp_avg.mul_(beta1_1d).add_(grad, alpha=1 - beta1_1d)
         exp_avg_sq.mul_(beta2_1d).addcmul_(grad, grad, value=1 - beta2_1d)
         bias_correction1 = 1.0 - beta1_1d**step
@@ -90,30 +89,42 @@ def update_fn(
                 max_exp_avg_sq.sqrt()
                 .mul(1 / math.sqrt(bias_correction2))
                 .add(eps)
-                .mul(bias_correction1)
+                .mul(
+                    bias_correction1
+                )  # TODO: mb change here and not multiply by bias_correction1
             )
         else:
             denom = (
                 exp_avg_sq.sqrt()
                 .mul(1 / math.sqrt(bias_correction2))
                 .add(eps)
-                .mul(bias_correction1)
+                .mul(
+                    bias_correction1
+                )  # TODO: mb change here and not multiply by bias_correction1
             )
-        real_update_tmp = (
+        # real_update_tmp = (
+        #     -lr
+        #     * lr_1d_factor
+        #     * torch.mul(p.data, weight_decay_1d).add(exp_avg.div(denom))
+        # )
+        p_curr_update_tmp = (
             -lr
             * lr_1d_factor
-            * torch.mul(p.data, weight_decay_1d).add(exp_avg.div(denom))
+            * torch.mul(p_curr.data, weight_decay_1d).add(
+                exp_avg.div(denom)
+            )  # mu2 change here!
         )
-        p.data.add_(real_update_tmp)
-    return exp_avg, exp_avg_sq
+        p_curr.data.add_(p_curr_update_tmp)
+        p.data.mul_(beta3_1d).add_(p_curr, alpha=1.0 - beta3_1d)  # mu2 change here!
+    return exp_avg, exp_avg_sq, p_curr
 
 
-class MARS(torch.optim.Optimizer):
+class Mu2(torch.optim.Optimizer):
     def __init__(
         self,
         params,
         lr=3e-3,
-        betas=(0.95, 0.99),
+        betas=(0.95, 0.99, 0.999),
         eps=1e-8,
         weight_decay=0.0,
         amsgrad=False,
@@ -122,7 +133,7 @@ class MARS(torch.optim.Optimizer):
         mars_type="mars-adamw",
         optimize_1d=False,
         lr_1d=3e-3,
-        betas_1d=(0.9, 0.95),
+        betas_1d=(0.9, 0.95, 0.999),
         weight_decay_1d=0.1,
     ):
         if not 0.0 <= lr:
@@ -133,6 +144,8 @@ class MARS(torch.optim.Optimizer):
             raise ValueError("Invalid beta parameter at index 0: {}".format(betas[0]))
         if not 0.0 <= betas[1] < 1.0:
             raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
+        if not 0.0 <= betas[2] < 1.0:
+            raise ValueError("Invalid beta parameter at index 2: {}".format(betas[2]))
         assert mars_type in [
             "mars-adamw",
             "mars-lion",
@@ -149,7 +162,7 @@ class MARS(torch.optim.Optimizer):
             optimize_1d=optimize_1d,
             weight_decay_1d=weight_decay_1d,
         )
-        super(MARS, self).__init__(params, defaults)
+        super(Mu2, self).__init__(params, defaults)
         self.eps = eps
         self.update_fn = update_fn
         self.lr = lr
@@ -188,7 +201,7 @@ class MARS(torch.optim.Optimizer):
                     state["previous_grad"].zero_().add_(p.grad, alpha=1.0)
 
     def __setstate__(self, state):
-        super(MARS, self).__setstate__(state)
+        super(Mu2, self).__setstate__(state)
         for group in self.param_groups:
             group.setdefault("amsgrad", False)
 
@@ -241,12 +254,18 @@ class MARS(torch.optim.Optimizer):
                     # state['previous_grad'] = torch.zeros_like(p)
                     # Exponential moving average of squared gradient values
                     state["exp_avg_sq"] = torch.zeros_like(p.data)
+                    # Mu2 buffer
+                    state["p_curr"] = torch.zeros_like(p.data)
                     if amsgrad:
                         # Maintains max of all exp. moving avg. of sq. grad. values
                         state["max_exp_avg_sq"] = torch.zeros_like(p.data)
-                exp_avg, exp_avg_sq = state["exp_avg"], state["exp_avg_sq"]
+                exp_avg, exp_avg_sq, p_curr = (
+                    state["exp_avg"],
+                    state["exp_avg_sq"],
+                    state["p_curr"],
+                )
                 last_grad = state["last_grad"]
-                lr, wd, beta1, beta2 = (
+                lr, wd, beta1, beta2, beta3 = (
                     group["lr"],
                     group["weight_decay"],
                     *group["betas"],
@@ -262,15 +281,17 @@ class MARS(torch.optim.Optimizer):
                     state["step"] = 1
                 step = state["step"]
                 is_grad_2d = len(grad.shape) == 2
-                exp_avg, exp_avg_sq = self.update_fn(
+                exp_avg, exp_avg_sq, p_curr = self.update_fn(
                     p,
                     grad,
                     exp_avg,
                     exp_avg_sq,
+                    p_curr,
                     lr,
                     wd,
                     beta1,
                     beta2,
+                    beta3,
                     last_grad,
                     self.eps,
                     amsgrad,

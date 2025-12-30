@@ -1,5 +1,5 @@
 """
-Here is an original implementation of Muon and Distributed Muon. 
+Here is an original implementation of Muon and Distributed Muon.
 _Note_ that 'class Muon'  is an old version which does not include weight decay for matrix params
 the newer version with weight decay is in the 'class DistributedMuon'.
 Source: https://github.com/KellerJordan/modded-nanogpt

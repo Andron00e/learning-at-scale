@@ -1,5 +1,5 @@
 """
-Here is an original implementation of SophiaG. 
+Here is an original implementation of SophiaG.
 Source: https://github.com/Liuhong99/Sophia
 """
 

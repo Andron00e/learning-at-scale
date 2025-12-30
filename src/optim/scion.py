@@ -1,5 +1,5 @@
 """
-Here is an original implementation of Scion. 
+Here is an original implementation of Scion.
 Source: TBD
 """
 

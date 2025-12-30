@@ -1,5 +1,5 @@
 """
-Here is an original implementation of Schedule-Free AdamW and Schedule-Free SGD. 
+Here is an original implementation of Schedule-Free AdamW and Schedule-Free SGD.
 Source: https://github.com/facebookresearch/schedule_free
 """
 
