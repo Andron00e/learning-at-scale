@@ -5,9 +5,9 @@ from contextlib import nullcontext
 from pathlib import Path
 
 import torch
-import wandb
 import yaml
 
+import wandb
 from logger.logger import DynamicsLogger
 from optim.weight_averaging import (ExponentialWeightAverager, WeightAverager,
                                     eval_ewa, eval_wa)

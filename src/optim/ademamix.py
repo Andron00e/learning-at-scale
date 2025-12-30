@@ -1,5 +1,5 @@
 """
-Here is an original implementation of AdEMAMix. 
+Here is an original implementation of AdEMAMix.
 Source: https://github.com/apple/ml-ademamix
 """
 

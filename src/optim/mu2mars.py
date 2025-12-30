@@ -2,7 +2,6 @@
 Here is an original implementation of Mu2MARS.
 """
 
-
 import math
 
 import torch
@@ -19,12 +18,12 @@ def update_fn(
     grad,
     exp_avg,
     exp_avg_sq,
-    mu_avg, # mu2 change here!
+    mu_avg,  # mu2 change here!
     lr,
     wd,
     beta1,
     beta2,
-    beta3, # mu2 change here!
+    beta3,  # mu2 change here!
     last_grad,
     eps,
     amsgrad,
@@ -45,11 +44,13 @@ def update_fn(
         if c_t_norm > 1.0:
             c_t = c_t / c_t_norm
         exp_avg.mul_(beta1).add_(c_t, alpha=1.0 - beta1)
-        mu_avg.mul_(beta3).add_(exp_avg, alpha=1.0 - beta3) # mu2 change here!
+        mu_avg.mul_(beta3).add_(exp_avg, alpha=1.0 - beta3)  # mu2 change here!
         if (mars_type == "mars-adamw") or (
             mars_type == "mars-shampoo" and not is_grad_2d
         ):
-            exp_avg_sq.mul_(beta2).addcmul_(c_t, c_t, value=1.0 - beta2) # TODO: mb should we use d_t here?
+            exp_avg_sq.mul_(beta2).addcmul_(
+                c_t, c_t, value=1.0 - beta2
+            )  # TODO: mb should we use d_t here?
             bias_correction1 = 1.0 - beta1**step
             bias_correction2 = 1.0 - beta2**step
             if amsgrad:
@@ -58,20 +59,28 @@ def update_fn(
                     max_exp_avg_sq.sqrt()
                     .mul(1 / math.sqrt(bias_correction2))
                     .add(eps)
-                    .mul(bias_correction1) # TODO: mb change here and not multiply by bias_correction1
+                    .mul(
+                        bias_correction1
+                    )  # TODO: mb change here and not multiply by bias_correction1
                 )
             else:
                 denom = (
                     exp_avg_sq.sqrt()
                     .mul(1 / math.sqrt(bias_correction2))
                     .add(eps)
-                    .mul(bias_correction1) # TODO: mb change here and not multiply by bias_correction1
+                    .mul(
+                        bias_correction1
+                    )  # TODO: mb change here and not multiply by bias_correction1
                 )
             # real_update_tmp = -lr * torch.mul(p.data, wd).add(exp_avg.div(denom))
-            real_update_tmp = -lr * torch.mul(p.data, wd).add(mu_avg.div(denom)) # mu2 change here!
+            real_update_tmp = -lr * torch.mul(p.data, wd).add(
+                mu_avg.div(denom)
+            )  # mu2 change here!
         elif mars_type == "mars-lion":
             # real_update_tmp = -lr * torch.mul(p.data, wd).add(exp_avg.sign())
-            real_update_tmp = -lr * torch.mul(p.data, wd).add(mu_avg.sign()) # mu2 change here!
+            real_update_tmp = -lr * torch.mul(p.data, wd).add(
+                mu_avg.sign()
+            )  # mu2 change here!
         elif mars_type == "mars-shampoo" and is_grad_2d:
             factor = max(1, grad.size(0) / grad.size(1)) ** 0.5
             # real_update_tmp = (
@@ -81,7 +90,9 @@ def update_fn(
             #     .mul(-lr)
             # )
             real_update_tmp = (
-                zeropower_via_newtonschulz5(mu_avg.mul(1.0 / (1.0 - beta1)), eps=eps) # mu2 change here!
+                zeropower_via_newtonschulz5(
+                    mu_avg.mul(1.0 / (1.0 - beta1)), eps=eps
+                )  # mu2 change here!
                 .mul(factor)
                 .add(wd, p.data)
                 .mul(-lr)
@@ -91,7 +102,7 @@ def update_fn(
         beta1_1d, beta2_1d, beta3_1d = betas_1d
         exp_avg.mul_(beta1_1d).add_(grad, alpha=1 - beta1_1d)
         exp_avg_sq.mul_(beta2_1d).addcmul_(grad, grad, value=1 - beta2_1d)
-        mu_avg.mul_(beta3_1d).add_(exp_avg, alpha = 1.0 - beta3_1d) # mu2 change here!
+        mu_avg.mul_(beta3_1d).add_(exp_avg, alpha=1.0 - beta3_1d)  # mu2 change here!
         bias_correction1 = 1.0 - beta1_1d**step
         bias_correction2 = 1.0 - beta2_1d**step
         if amsgrad:
@@ -100,14 +111,18 @@ def update_fn(
                 max_exp_avg_sq.sqrt()
                 .mul(1 / math.sqrt(bias_correction2))
                 .add(eps)
-                .mul(bias_correction1) # TODO: mb change here and not multiply by bias_correction1
+                .mul(
+                    bias_correction1
+                )  # TODO: mb change here and not multiply by bias_correction1
             )
         else:
             denom = (
                 exp_avg_sq.sqrt()
                 .mul(1 / math.sqrt(bias_correction2))
                 .add(eps)
-                .mul(bias_correction1) # TODO: mb change here and not multiply by bias_correction1
+                .mul(
+                    bias_correction1
+                )  # TODO: mb change here and not multiply by bias_correction1
             )
         # real_update_tmp = (
         #     -lr
@@ -117,7 +132,9 @@ def update_fn(
         real_update_tmp = (
             -lr
             * lr_1d_factor
-            * torch.mul(p.data, weight_decay_1d).add(mu_avg.div(denom)) # mu2 change here!
+            * torch.mul(p.data, weight_decay_1d).add(
+                mu_avg.div(denom)
+            )  # mu2 change here!
         )
         p.data.add_(real_update_tmp)
     return exp_avg, exp_avg_sq, mu_avg
@@ -263,7 +280,11 @@ class Mu2MARS(torch.optim.Optimizer):
                     if amsgrad:
                         # Maintains max of all exp. moving avg. of sq. grad. values
                         state["max_exp_avg_sq"] = torch.zeros_like(p.data)
-                exp_avg, exp_avg_sq, mu_avg = state["exp_avg"], state["exp_avg_sq"], state["mu_avg"]
+                exp_avg, exp_avg_sq, mu_avg = (
+                    state["exp_avg"],
+                    state["exp_avg_sq"],
+                    state["mu_avg"],
+                )
                 last_grad = state["last_grad"]
                 lr, wd, beta1, beta2, beta3 = (
                     group["lr"],

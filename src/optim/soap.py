@@ -1,5 +1,5 @@
 """
-Here is an original implementation of SOAP. 
+Here is an original implementation of SOAP.
 Source: https://github.com/nikhilvyas/SOAP
 """
 

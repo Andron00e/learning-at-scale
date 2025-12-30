@@ -1,5 +1,5 @@
 """
-Here is an original implementation of Lion. 
+Here is an original implementation of Lion.
 Source: https://github.com/google/automl/tree/master/lion
 """
 

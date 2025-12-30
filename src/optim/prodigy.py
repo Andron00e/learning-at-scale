@@ -1,5 +1,5 @@
 """
-Here is an original implementation of Prodigy. 
+Here is an original implementation of Prodigy.
 Source: https://github.com/konstmish/prodigy
 """
 

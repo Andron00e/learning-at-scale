@@ -9,10 +9,10 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import wandb
 
 import config
 import distributed
+import wandb
 from data.utils import DataReader, get_dataset
 from models.utils import get_model
 from optim.adafactor import Adafactor
@@ -24,6 +24,7 @@ from optim.lion import Lion
 from optim.mars import MARS
 from optim.mu2mars import Mu2MARS
 from optim.muon import CombinedScheduler, DistributedMuon, Muon
+from optim.nesterov_ademamix import NesterovAdEMAMix
 from optim.prodigy import Prodigy
 from optim.schedule import cos_inf_schedule, wsd_schedule
 from optim.schedulefree import AdamWScheduleFree, SGDScheduleFree
@@ -32,6 +33,7 @@ from optim.sign import Signum
 from optim.soap import SOAP
 from optim.sophia import SophiaG
 from optim.spectral import SpAdamW
+from optim.aggmo import AggMo, AggMo2
 
 
 def get_args():
@@ -379,7 +381,11 @@ def main(args, parser):
             mars_type=args.mars_type,
             optimize_1d=False,  # we set in order to optimize 1D parameters with AdamW
             lr_1d=args.lr,  # AdamW's lr when optimize_1d=False
-            betas_1d=(args.beta1, args.beta2, args.mu_beta3_1d),  # AdamW's betas when optimize_1d=False
+            betas_1d=(
+                args.beta1,
+                args.beta2,
+                args.mu_beta3_1d,
+            ),  # AdamW's betas when optimize_1d=False
             weight_decay_1d=0.1,  # AdamW's weight decay
         )
     elif args.opt == "spadamw":
@@ -394,6 +400,33 @@ def main(args, parser):
             ns_iter=args.muon_ns_steps,
             bias_correction=args.correct_bias,
             normalization=args.sp_normalize,
+        )
+    elif args.opt == "nesterov-ademamix":
+        opt = NesterovAdEMAMix(
+            group_specs,
+            lr=args.lr,
+            betas=(args.beta1, args.beta2, args.adema_beta3),
+            alpha=args.adema_alpha,
+            beta3_warmup=args.adema_beta3_warmup,
+            alpha_warmup=args.adema_alpha_warmup,
+            weight_decay=args.weight_decay,
+        )
+    elif args.opt == "aggmo":
+        opt = AggMo(
+            group_specs,
+            lr=args.lr,
+            betas=[args.beta1, args.beta2, args.adema_beta3], # three for now
+            weight_decay=args.weight_decay,
+            decouple=args.adopt_decouple,
+        )
+    elif args.opt == "aggmo2":
+        opt = AggMo2(
+            group_specs,
+            lr=args.lr,
+            betas=[args.beta1, args.beta2, args.adema_beta3], # three for now
+            beta2=args.beta2,
+            weight_decay=args.weight_decay,
+            decouple=args.adopt_decouple,
         )
     else:
         opt = torch.optim.SGD(
@@ -561,8 +594,13 @@ def get_exp_name(
         "log_interval",
         "log_parameter_norms",
         "log_dynamics",
+        "experiment_name",
     ],
 ):
+    # Set the custom exp name if needed
+    if args.experiment_name is not None:
+        return args.experiment_name
+    
     # Get the default values
     defaults = vars(parser.parse_args([]))
 

@@ -2,15 +2,17 @@
 Here is an original implementation of SpAdamW.
 """
 
-import torch
 import math
-import numpy as np
 
+import numpy as np
+import torch
+
+from .ademamix import linear_hl_warmup_scheduler, linear_warmup_scheduler
 from .muon import zeropower_via_newtonschulz5
-from .ademamix import linear_warmup_scheduler, linear_hl_warmup_scheduler
+
 
 @torch.compile
-def matrix_inv_sqrt_NS(A: torch.Tensor, alpha: torch.Tensor, ns_iter: int=10):
+def matrix_inv_sqrt_NS(A: torch.Tensor, alpha: torch.Tensor, ns_iter: int = 10):
     assert A.ndim == 2 and A.size(0) == A.size(1), "A must be square"
     device = A.device
     n = A.size(0)
@@ -22,47 +24,50 @@ def matrix_inv_sqrt_NS(A: torch.Tensor, alpha: torch.Tensor, ns_iter: int=10):
     Z = I.clone()
     # Newton–Schulz iterations
     for _ in range(ns_iter):
-        T = 0.5 * (3.0 * I - Z @ Y)   
+        T = 0.5 * (3.0 * I - Z @ Y)
         Y = Y @ T
         Z = T @ Z
     # Rescale Z to get A^{-1/2}
     return Z / alpha.sqrt()
 
-def clip_sigvals(G: torch.Tensor, clip_c: float=1.0, ns_iter: int = 10):
+
+def clip_sigvals(G: torch.Tensor, clip_c: float = 1.0, ns_iter: int = 10):
     X = G.bfloat16()
     # X = G.float()
-    #clip_c = torch.as_tensor(clip_c, dtype=G.dtype, device=G.device)
+    # clip_c = torch.as_tensor(clip_c, dtype=G.dtype, device=G.device)
     transposed = False
     if X.size(-2) > X.size(-1):
         X = X.mT
         transposed = True
-    XXT = X @ X.mT 
-    s_max = torch.minimum(X.norm(dim=(-2, -1)), 
-                      XXT.abs().sum(dim=-2).max().sqrt()) + 1e-7
+    XXT = X @ X.mT
+    s_max = (
+        torch.minimum(X.norm(dim=(-2, -1)), XXT.abs().sum(dim=-2).max().sqrt()) + 1e-7
+    )
     if s_max <= clip_c:
-        return G 
+        return G
     InvSqrt = matrix_inv_sqrt_NS(
         (XXT / clip_c**2) + torch.eye(X.size(-2), dtype=X.dtype, device=X.device),
-        alpha=(s_max / clip_c)**2 + 1,
-        ns_iter=ns_iter
+        alpha=(s_max / clip_c) ** 2 + 1,
+        ns_iter=ns_iter,
     )
     out = InvSqrt @ X
     if transposed:
         out = out.mT
     return out
 
+
 class ClippingSchedule:
     def __init__(self, c0, c1, warmup_iters, mode="cos", k=10.0):
-        """ Clipping schedule from c0 to c1 over warmup_iters iterations. 
+        """Clipping schedule from c0 to c1 over warmup_iters iterations.
             Then it stays at c1.
         Modes: 'cos' (cosine), 'exp' (exponential), 'linear' (linear).
         """
 
-        self.c0 = float(c0)   # start threshold
-        self.c1 = float(c1)   # end threshold
+        self.c0 = float(c0)  # start threshold
+        self.c1 = float(c1)  # end threshold
         self.T = int(warmup_iters)
         self.mode = mode
-        self.k = float(k)     # decay rate for exp
+        self.k = float(k)  # decay rate for exp
 
     def __call__(self, step: int) -> float:
         # if we’re past training, just freeze at c1
@@ -72,11 +77,11 @@ class ClippingSchedule:
         t = step / self.T
         # schedule in [0,1], decreasing
         if self.mode == "cos":
-            s = 0.5 * (1 + math.cos(math.pi * t))   # cosine
+            s = 0.5 * (1 + math.cos(math.pi * t))  # cosine
         elif self.mode == "exp":
-            s = math.exp(-self.k * t)               # fast decay
+            s = math.exp(-self.k * t)  # fast decay
         elif self.mode == "linear":
-            s = 1.0 - t                             # straight line
+            s = 1.0 - t  # straight line
         else:
             raise ValueError("Unknown mode: choose 'cos', 'exp', or 'linear'")
         # interpolate between c0 and c1
@@ -84,7 +89,7 @@ class ClippingSchedule:
 
 
 class SpAdamW(torch.optim.Optimizer):
-    """ Implements AdamW algorithm with spectral clipping / normalization.
+    """Implements AdamW algorithm with spectral clipping / normalization.
     Parameters:
         lr (float): learning rate for the matrix update after clipping. Default 1e-3.
         betas (tuple of 2 floats): adam's beta parameters (b1, b2). Default: (0.9, 0.999)
@@ -97,44 +102,74 @@ class SpAdamW(torch.optim.Optimizer):
         normalization (bool): if True, use spectral normalization instead of clipping. Default False.
     """
 
-    def __init__(self, 
-                params, 
-                lr=1e-3, 
-                betas=(0.9, 0.999), 
-                eps=1e-8, 
-                weight_decay=0.1, 
-                clip_c=(10,10),
-                sp_clip_mode='cos',
-                ns_iter=10,
-                warmup_iters=2000,
-                bias_correction=True,
-                normalization=False
-            ):
+    def __init__(
+        self,
+        params,
+        lr=1e-3,
+        betas=(0.9, 0.999),
+        eps=1e-8,
+        weight_decay=0.1,
+        clip_c=(10, 10),
+        sp_clip_mode="cos",
+        ns_iter=10,
+        warmup_iters=2000,
+        bias_correction=True,
+        normalization=False,
+    ):
         if lr < 0.0:
             raise ValueError("Invalid learning rate: {} - should be >= 0.0".format(lr))
         if not 0.0 <= betas[0] < 1.0:
-            raise ValueError("Invalid beta parameter: {} - should be in [0.0, 1.0[".format(betas[0]))
+            raise ValueError(
+                "Invalid beta parameter: {} - should be in [0.0, 1.0[".format(betas[0])
+            )
         if not 0.0 <= betas[1] < 1.0:
-            raise ValueError("Invalid beta parameter: {} - should be in [0.0, 1.0[".format(betas[1]))
+            raise ValueError(
+                "Invalid beta parameter: {} - should be in [0.0, 1.0[".format(betas[1])
+            )
         if not 0.0 <= eps:
             raise ValueError("Invalid epsilon value: {} - should be >= 0.0".format(eps))
         if not (clip_c[0] > 0.0 and clip_c[1] > 0.0):
-            raise ValueError("Invalid clip_c parameters: {} - should be c0,c1 > 0.0".format(clip_c))
-        if not sp_clip_mode in ['cos', 'exp', 'linear']:
-            raise ValueError("Invalid spectral clipping mode: {} - should be 'cos', 'exp', or 'linear'".format(sp_clip_mode))
+            raise ValueError(
+                "Invalid clip_c parameters: {} - should be c0,c1 > 0.0".format(clip_c)
+            )
+        if not sp_clip_mode in ["cos", "exp", "linear"]:
+            raise ValueError(
+                "Invalid spectral clipping mode: {} - should be 'cos', 'exp', or 'linear'".format(
+                    sp_clip_mode
+                )
+            )
         if not warmup_iters >= 0:
-            raise ValueError("Invalid warmup_iters for clipping: {} - should be >= 0".format(warmup_iters))
+            raise ValueError(
+                "Invalid warmup_iters for clipping: {} - should be >= 0".format(
+                    warmup_iters
+                )
+            )
         if not ns_iter >= 1:
             raise ValueError("Invalid ns_iter: {} - should be >= 1".format(ns_iter))
         if not 0.0 <= weight_decay:
-            raise ValueError("Invalid weight_decay value: {} - should be >= 0.0".format(weight_decay))
+            raise ValueError(
+                "Invalid weight_decay value: {} - should be >= 0.0".format(weight_decay)
+            )
         if not isinstance(normalization, bool):
-            raise ValueError("Invalid normalization value: {} - should be boolean".format(normalization))
-        
-        defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay, 
-                        ns_iter=ns_iter, bias_correction=bias_correction, normalization=normalization)
+            raise ValueError(
+                "Invalid normalization value: {} - should be boolean".format(
+                    normalization
+                )
+            )
+
+        defaults = dict(
+            lr=lr,
+            betas=betas,
+            eps=eps,
+            weight_decay=weight_decay,
+            ns_iter=ns_iter,
+            bias_correction=bias_correction,
+            normalization=normalization,
+        )
         super().__init__(params, defaults)
-        self.clipping_schedule = ClippingSchedule(clip_c[0], clip_c[1], warmup_iters, mode=sp_clip_mode)
+        self.clipping_schedule = ClippingSchedule(
+            clip_c[0], clip_c[1], warmup_iters, mode=sp_clip_mode
+        )
 
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -149,32 +184,38 @@ class SpAdamW(torch.optim.Optimizer):
                 loss = closure()
 
         with torch.no_grad():
-            state_full = self.state 
-            if state_full.get('step') is None:
-                state_full['step'] = 0
+            state_full = self.state
+            if state_full.get("step") is None:
+                state_full["step"] = 0
             clip_c = self.clipping_schedule(state_full["step"])
-            #wandb.log({"train/clip_c": clip_c}, step=state_full["step"]+1)
+            # wandb.log({"train/clip_c": clip_c}, step=state_full["step"]+1)
 
             for group in self.param_groups:
                 step_size = group["lr"]
                 eps = group["eps"]
                 weight_decay = group["weight_decay"]
                 beta1, beta2 = group["betas"]
-                
+
                 for p in group["params"]:
                     if p.grad is None:
                         continue
                     grad = p.grad.data
 
                     if grad.is_sparse:
-                        raise RuntimeError("Adam does not support sparse gradients, please consider SparseAdam instead")
+                        raise RuntimeError(
+                            "Adam does not support sparse gradients, please consider SparseAdam instead"
+                        )
 
                     state = self.state[p]
-                    
+
                     if len(state) == 0:
                         state["step"] = 0
-                        state["exp_avg"] = torch.zeros_like(p.data, memory_format=torch.preserve_format)
-                        state["exp_avg_sq"] = torch.zeros_like(p.data, memory_format=torch.preserve_format)
+                        state["exp_avg"] = torch.zeros_like(
+                            p.data, memory_format=torch.preserve_format
+                        )
+                        state["exp_avg_sq"] = torch.zeros_like(
+                            p.data, memory_format=torch.preserve_format
+                        )
 
                     exp_avg, exp_avg_sq = state["exp_avg"], state["exp_avg_sq"]
                     state["step"] += 1
@@ -184,37 +225,41 @@ class SpAdamW(torch.optim.Optimizer):
                     if group["bias_correction"]:
                         bias_correction1 = 1 - beta1 ** state["step"]
                         bias_correction2 = 1 - beta2 ** state["step"]
-                        denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(eps)
+                        denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(
+                            eps
+                        )
                         step_num = exp_avg / bias_correction1
                         update = step_num / denom
                     else:
                         update = exp_avg / (exp_avg_sq.sqrt() + eps)
-                    
+
                     if 2 >= state["exp_avg"].dim() > 1:
-                        if group['normalization']:
+                        if group["normalization"]:
                             update = zeropower_via_newtonschulz5(update, 5)
                         else:
-                            update = clip_sigvals(update, clip_c, group['ns_iter'])
-                        update *= max(1, grad.size(-2) / grad.size(-1))**0.5
+                            update = clip_sigvals(update, clip_c, group["ns_iter"])
+                        update *= max(1, grad.size(-2) / grad.size(-1)) ** 0.5
                         p.data.add_(-step_size * update)
 
-                    elif state["exp_avg"].dim() == 1:   
+                    elif state["exp_avg"].dim() == 1:
                         vec_sinval = update.norm()
-                        if group['normalization']:
-                            update /= (vec_sinval + eps)
+                        if group["normalization"]:
+                            update /= vec_sinval + eps
                         else:
                             if vec_sinval > clip_c:
-                                update *= (clip_c / vec_sinval)
+                                update *= clip_c / vec_sinval
                         p.data.add_(-step_size * update)
                     else:
-                        NotImplementedError("Only implemented methods for parameters with 1 or 2 dimensions.")
+                        NotImplementedError(
+                            "Only implemented methods for parameters with 1 or 2 dimensions."
+                        )
 
                     if group["weight_decay"] > 0.0:
-                        p.data.add_(p.data, alpha=-step_size * weight_decay)    
-                   
+                        p.data.add_(p.data, alpha=-step_size * weight_decay)
+
             state_full["step"] += 1
         return loss
-    
+
 
 class SpAdEMAMix(torch.optim.Optimizer):
     r"""Implements the SpAdEMAMix algorithm.
@@ -249,9 +294,9 @@ class SpAdEMAMix(torch.optim.Optimizer):
         eps=1e-8,
         weight_decay=0,
         clip_c=1,
-        sp_clip_mode='cos',
+        sp_clip_mode="cos",
         ns_iter=10,
-        normalization=False
+        normalization=False,
     ):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
@@ -275,9 +320,9 @@ class SpAdEMAMix(torch.optim.Optimizer):
             beta3_warmup=beta3_warmup,
             alpha_warmup=alpha_warmup,
             weight_decay=weight_decay,
-            clip_c=clip_c, 
-            ns_iter=ns_iter, 
-            normalization=normalization
+            clip_c=clip_c,
+            ns_iter=ns_iter,
+            normalization=normalization,
         )
         super(SpAdEMAMix, self).__init__(params, defaults)
 
@@ -386,25 +431,25 @@ class SpAdEMAMix(torch.optim.Optimizer):
                         update = zeropower_via_newtonschulz5(update, 5)
                     else:
                         update = clip_sigvals(update, clip_c, ns_iter)
-                    update *= max(1, grad.size(-2) / grad.size(-1))**0.5
-                    p.data.add_(-lr*update)
+                    update *= max(1, grad.size(-2) / grad.size(-1)) ** 0.5
+                    p.data.add_(-lr * update)
 
-                elif update.dim() == 1:   
+                elif update.dim() == 1:
                     vec_sinval = update.norm()
-                    if group['normalization']:
-                        update /= (vec_sinval + 1e-7)
+                    if group["normalization"]:
+                        update /= vec_sinval + 1e-7
                     else:
                         if vec_sinval > clip_c:
-                            update *= (clip_c / vec_sinval)
-                    p.data.add_(-lr*update)
+                            update *= clip_c / vec_sinval
+                    p.data.add_(-lr * update)
 
                 else:
-                    NotImplementedError("Only implemented methods for parameters with 1 or 2 dimensions.")
+                    NotImplementedError(
+                        "Only implemented methods for parameters with 1 or 2 dimensions."
+                    )
 
                 # decay
                 if lmbda > 0.0:
                     p.data.add_(p.data, alpha=-lr * lmbda)
 
         return loss
-
-
