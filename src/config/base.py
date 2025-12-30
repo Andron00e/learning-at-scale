@@ -172,7 +172,11 @@ def parse_args(base_parser, args, namespace):
     parser.add_argument(
         "--sp_clip_mode",
         default="cos",
-        choices=["linear", "cos", "exp",],
+        choices=[
+            "linear",
+            "cos",
+            "exp",
+        ],
     )
     parser.add_argument(
         "--weight_average", action="store_true"

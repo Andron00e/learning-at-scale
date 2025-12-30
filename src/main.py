@@ -379,7 +379,11 @@ def main(args, parser):
             mars_type=args.mars_type,
             optimize_1d=False,  # we set in order to optimize 1D parameters with AdamW
             lr_1d=args.lr,  # AdamW's lr when optimize_1d=False
-            betas_1d=(args.beta1, args.beta2, args.mu_beta3_1d),  # AdamW's betas when optimize_1d=False
+            betas_1d=(
+                args.beta1,
+                args.beta2,
+                args.mu_beta3_1d,
+            ),  # AdamW's betas when optimize_1d=False
             weight_decay_1d=0.1,  # AdamW's weight decay
         )
     elif args.opt == "spadamw":
