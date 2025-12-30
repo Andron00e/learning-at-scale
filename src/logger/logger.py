@@ -261,6 +261,37 @@ class DynamicsLogger:
                     mean_neuron_alignment
                 )
 
+        if "tensor_fast_momentum_rms" in requested_stats:
+            # AdEMAMix Only!
+            for name, pre_param in pre_params.items():
+                post_state = post_states[name]
+                post_m = post_state["exp_avg_fast"]
+
+                self.stats["tensor_fast_momentum_rms"][name].append(
+                    post_m.square().mean().sqrt()
+                )
+
+        if "tensor_slow_momentum_rms" in requested_stats:
+            # AdEMAMix Only!
+            for name, pre_param in pre_params.items():
+                post_state = post_states[name]
+                post_m = post_state["exp_avg_slow"]
+
+                self.stats["tensor_slow_momentum_rms"][name].append(
+                    post_m.square().mean().sqrt()
+                )
+
+        if "tensor_fast_slow_ratio" in requested_stats:
+            # AdEMAMix Only!
+            for name, pre_param in pre_params.items():
+                post_state = post_states[name]
+                post_m1 = post_state["exp_avg_fast"]
+                post_m3 = post_state["exp_avg_slow"]
+
+                self.stats["tensor_fast_slow_ratio"][name].append(
+                    post_m3.square().mean().sqrt() / post_m1.square().mean().sqrt()
+                )
+
         # TODO: Log averages for scalar vectors
         if "scalar_rms" in requested_stats:
             for name, pre_param in pre_params.items():
