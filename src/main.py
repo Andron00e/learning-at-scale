@@ -9,15 +9,16 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import wandb
 
 import config
 import distributed
-import wandb
 from data.utils import DataReader, get_dataset
 from models.utils import get_model
 from optim.adafactor import Adafactor
 from optim.ademamix import AdEMAMix, SimAdEMAMix
 from optim.adopt import ADOPT
+from optim.aggmo import AggMo, AggMo2
 from optim.base import train
 from optim.lamb import Lamb
 from optim.lion import Lion
@@ -33,7 +34,6 @@ from optim.sign import Signum
 from optim.soap import SOAP
 from optim.sophia import SophiaG
 from optim.spectral import SpAdamW
-from optim.aggmo import AggMo, AggMo2
 
 
 def get_args():
@@ -415,7 +415,7 @@ def main(args, parser):
         opt = AggMo(
             group_specs,
             lr=args.lr,
-            betas=[args.beta1, args.beta2, args.adema_beta3], # three for now
+            betas=[args.beta1, args.beta2, args.adema_beta3],  # three for now
             weight_decay=args.weight_decay,
             decouple=args.adopt_decouple,
         )
@@ -423,7 +423,7 @@ def main(args, parser):
         opt = AggMo2(
             group_specs,
             lr=args.lr,
-            betas=[args.beta1, args.beta2, args.adema_beta3], # three for now
+            betas=[args.beta1, args.beta2, args.adema_beta3],  # three for now
             beta2=args.beta2,
             weight_decay=args.weight_decay,
             decouple=args.adopt_decouple,
@@ -600,7 +600,7 @@ def get_exp_name(
     # Set the custom exp name if needed
     if args.experiment_name is not None:
         return args.experiment_name
-    
+
     # Get the default values
     defaults = vars(parser.parse_args([]))
 
