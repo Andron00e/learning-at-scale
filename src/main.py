@@ -594,6 +594,7 @@ def get_exp_name(
         "log_interval",
         "log_parameter_norms",
         "log_dynamics",
+        "dynamics_logger_cfg",
         "experiment_name",
     ],
 ):
